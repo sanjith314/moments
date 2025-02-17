@@ -36,6 +36,11 @@ If you just want to try it out, generate fake data with `flask lorem` command th
 $ pdm run flask lorem
 ```
 
+//New - Do these steps before running the program
+pip install pip install azure-cognitiveservices-vision-computervision
+Create a Microsoft Azure Computer Vision API KEY and Endpoint
+Store it in a .env file and store it under hte variable names 'key' and 'endpoint'
+
 It will create a test account:
 
 * email: `admin@helloflask.com`
