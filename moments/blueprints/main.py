@@ -3,6 +3,13 @@ from flask_login import current_user, login_required
 from sqlalchemy import func, select
 from sqlalchemy.orm import with_parent
 
+from dotenv import load_dotenv
+import os
+
+from azure.cognitiveservices.vision.computervision import ComputerVisionClient
+from azure.cognitiveservices.vision.computervision.models import VisualFeatureTypes
+from msrest.authentication import CognitiveServicesCredentials
+
 from moments.core.extensions import db
 from moments.decorators import confirm_required, permission_required
 from moments.forms.main import CommentForm, DescriptionForm, TagForm
@@ -11,7 +18,10 @@ from moments.notifications import push_collect_notification, push_comment_notifi
 from moments.utils import flash_errors, redirect_back, rename_image, resize_image, validate_image
 
 main_bp = Blueprint('main', __name__)
-
+load_dotenv()
+endpoint = os.getenv('endpoint')
+key = os.getenv('key')
+computervision_client = ComputerVisionClient(endpoint, CognitiveServicesCredentials(key))
 
 @main_bp.route('/')
 def index():
@@ -117,6 +127,18 @@ def get_image(filename):
 def get_avatar(filename):
     return send_from_directory(current_app.config['AVATARS_SAVE_PATH'], filename)
 
+def alt_text_generate(filename):
+    image = open(filename, "rb")
+    results = computervision_client.describe_image_in_stream(image, visual_features=[VisualFeatureTypes.description])
+    return results.captions[0].text if results else ""
+    
+def analyze_image_objects(filename):
+    with open(filename, "rb") as image_stream:
+        image_analysis = computervision_client.analyze_image_in_stream(image_stream, visual_features=[VisualFeatureTypes.objects])
+    detected_objects = image_analysis.objects
+    tags = [obj.object_property for obj in detected_objects]
+    return tags if tags else []
+
 
 @main_bp.route('/upload', methods=['GET', 'POST'])
 @login_required
@@ -133,8 +155,11 @@ def upload():
         f.save(current_app.config['MOMENTS_UPLOAD_PATH'] / filename)
         filename_s = resize_image(f, filename, current_app.config['MOMENTS_PHOTO_SIZES']['small'])
         filename_m = resize_image(f, filename, current_app.config['MOMENTS_PHOTO_SIZES']['medium'])
+        generated_alt_text = alt_text_generate(current_app.config['MOMENTS_UPLOAD_PATH'] / filename)
+        generated_tag_models = analyze_image_objects(current_app.config['MOMENTS_UPLOAD_PATH'] / filename)
+        generated_tags = [Tag(name=tag) for tag in generated_tag_models]
         photo = Photo(
-            filename=filename, filename_s=filename_s, filename_m=filename_m, author=current_user._get_current_object()
+            filename=filename, filename_s=filename_s, filename_m=filename_m, author=current_user._get_current_object(), description=generated_alt_text, tags=generated_tags
         )
         db.session.add(photo)
         db.session.commit()
